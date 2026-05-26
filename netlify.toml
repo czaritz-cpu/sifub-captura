@@ -3,11 +3,13 @@
   publish = "dist"
   functions = "netlify/functions"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["googleapis"]
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+
+[functions."guardar"]
+  timeout = 26

@@ -10,6 +10,29 @@ import { buildFolderName, buildFileName, fullName } from '../lib/utils'
 
 const SLOTS = ['frontal', 'trasera', 'acuse', 'foto']
 
+// Comprime imagen a máximo 800px y calidad 0.7
+function compressImage(file, maxSize = 800, quality = 0.7) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = (e) => {
+      const img = new Image()
+      img.src = e.target.result
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let w = img.width, h = img.height
+        if (w > h && w > maxSize) { h = (h * maxSize) / w; w = maxSize }
+        else if (h > maxSize) { w = (w * maxSize) / h; h = maxSize }
+        canvas.width = w; canvas.height = h
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+        canvas.toBlob((blob) => {
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }))
+        }, 'image/jpeg', quality)
+      }
+    }
+  })
+}
+
 export default function Captura() {
   const { state }   = useLocation()
   const navigate    = useNavigate()
@@ -52,6 +75,14 @@ export default function Captura() {
 
     setSaving(true); setBlocked(true)
     try {
+      show('Comprimiendo imágenes...', 'info')
+
+      // Comprimir las 4 fotos antes de subir
+      const fotosComprimidas = {}
+      for (const tipo of SLOTS) {
+        fotosComprimidas[tipo] = await compressImage(fotos[tipo])
+      }
+
       const fd = new FormData()
       fd.append('beneficiario',      JSON.stringify(beneficiario))
       fd.append('capturista_nombre', user?.nombre || user?.email || 'Desconocido')
@@ -59,9 +90,10 @@ export default function Captura() {
       fd.append('access_token',      user.access_token)
 
       SLOTS.forEach(tipo => {
-        const ext  = fotos[tipo].name.split('.').pop() || 'jpg'
+        const file = fotosComprimidas[tipo]
+        const ext  = 'jpg'
         const name = buildFileName(beneficiario, tipo) + '.' + ext
-        fd.append(tipo, fotos[tipo], name)
+        fd.append(tipo, file, name)
       })
 
       const res  = await fetch('/.netlify/functions/guardar', { method: 'POST', body: fd })
