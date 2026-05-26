@@ -17,10 +17,10 @@ export default function Captura() {
   const { toasts, show } = useToast()
 
   const beneficiario = state?.beneficiario
-  const [fotos, setFotos]       = useState({})
-  const [saving, setSaving]     = useState(false)
-  const [done, setDone]         = useState(null)
-  const [blocked, setBlocked]   = useState(false)
+  const [fotos, setFotos]     = useState({})
+  const [saving, setSaving]   = useState(false)
+  const [done, setDone]       = useState(null)
+  const [blocked, setBlocked] = useState(false)
 
   if (!beneficiario) {
     return (
@@ -37,7 +37,6 @@ export default function Captura() {
   }
 
   const allReady = SLOTS.every(s => fotos[s])
-
   const handleChange = (tipo, file) => setFotos(f => ({ ...f, [tipo]: file }))
   const handleClear  = (tipo)       => setFotos(f => { const n = { ...f }; delete n[tipo]; return n })
 
@@ -46,12 +45,19 @@ export default function Captura() {
     if (blocked)   { show('Ya se está guardando, espera...', 'error'); return }
     if (beneficiario.capturado) { show('Este beneficiario ya fue capturado anteriormente', 'error'); return }
 
+    if (!user?.access_token) {
+      show('Sesión expirada. Por favor vuelve a iniciar sesión con Google.', 'error')
+      return
+    }
+
     setSaving(true); setBlocked(true)
     try {
       const fd = new FormData()
-      fd.append('beneficiario', JSON.stringify(beneficiario))
+      fd.append('beneficiario',      JSON.stringify(beneficiario))
       fd.append('capturista_nombre', user?.nombre || user?.email || 'Desconocido')
       fd.append('capturista_email',  user?.email  || '')
+      fd.append('access_token',      user.access_token)
+
       SLOTS.forEach(tipo => {
         const ext  = fotos[tipo].name.split('.').pop() || 'jpg'
         const name = buildFileName(beneficiario, tipo) + '.' + ext
@@ -112,7 +118,8 @@ export default function Captura() {
       <Toast toasts={toasts} />
       <div className="container" style={{ paddingTop: 24, paddingBottom: 48 }}>
 
-        <button className="btn btn-ghost" style={{ marginBottom: 20, height: 36, padding: '0 12px', fontSize: 13 }}
+        <button className="btn btn-ghost"
+          style={{ marginBottom: 20, height: 36, padding: '0 12px', fontSize: 13 }}
           onClick={() => navigate('/buscar')}>
           <ArrowLeft size={15} /> Volver
         </button>

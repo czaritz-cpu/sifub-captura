@@ -1,15 +1,18 @@
 import { google } from 'googleapis'
 import { Readable } from 'stream'
 
-function getAuth() {
+function getServiceAuth() {
   const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
   return new google.auth.GoogleAuth({
     credentials: creds,
-    scopes: [
-      'https://www.googleapis.com/auth/drive',
-      'https://www.googleapis.com/auth/spreadsheets',
-    ],
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   })
+}
+
+function getUserDriveAuth(accessToken) {
+  const oauth2 = new google.auth.OAuth2()
+  oauth2.setCredentials({ access_token: accessToken })
+  return oauth2
 }
 
 function normalize(s) {
@@ -35,7 +38,6 @@ function parseMultipart(event) {
   const parts  = {}
   const sep    = Buffer.from('--' + boundary)
   let pos      = 0
-
   while (pos < body.length) {
     const start = body.indexOf(sep, pos)
     if (start === -1) break
@@ -43,7 +45,7 @@ function parseMultipart(event) {
     const hEnd   = body.indexOf(Buffer.from('\r\n\r\n'), hStart)
     if (hEnd === -1) break
     const headers = body.slice(hStart, hEnd).toString()
-    const nameMatch    = headers.match(/name="([^"]+)"/)
+    const nameMatch     = headers.match(/name="([^"]+)"/)
     const filenameMatch = headers.match(/filename="([^"]+)"/)
     const dataStart = hEnd + 4
     const dataEnd   = body.indexOf(Buffer.from('\r\n' + '--' + boundary), dataStart)
@@ -71,6 +73,9 @@ export const handler = async (event) => {
     const capturista_nombre = parts.capturista_nombre?.text || 'Desconocido'
     const capturista_email  = parts.capturista_email?.text  || ''
 
+    const accessToken = parts.access_token?.text || event.headers['x-access-token']
+    if (!accessToken) throw new Error('No se recibió access_token del usuario. Vuelve a iniciar sesión.')
+
     if (!b.no_acuse) throw new Error('Datos del beneficiario incompletos')
 
     const SLOTS = ['frontal', 'trasera', 'acuse', 'foto']
@@ -78,14 +83,14 @@ export const handler = async (event) => {
       if (!parts[s]?.data?.length) throw new Error(`Falta imagen: ${s}`)
     }
 
-    const auth  = getAuth()
-    const drive = google.drive({ version: 'v3', auth })
-    const sheets = google.sheets({ version: 'v4', auth })
+    const driveAuth  = getUserDriveAuth(accessToken)
+    const drive      = google.drive({ version: 'v3', auth: driveAuth })
+    const serviceAuth = getServiceAuth()
+    const sheets      = google.sheets({ version: 'v4', auth: serviceAuth })
 
     const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID
     const sheetId      = process.env.GOOGLE_SHEET_ID
-
-    const folderName = buildFolderName(b)
+    const folderName   = buildFolderName(b)
 
     const existing = await drive.files.list({
       q: `name='${folderName}' and '${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
@@ -107,9 +112,9 @@ export const handler = async (event) => {
     const folderUrl = folder.data.webViewLink
 
     for (const tipo of SLOTS) {
-      const part = parts[tipo]
-      const ext  = part.filename?.split('.').pop() || 'jpg'
-      const name = buildFileName(b, tipo) + '.' + ext
+      const part   = parts[tipo]
+      const ext    = part.filename?.split('.').pop() || 'jpg'
+      const name   = buildFileName(b, tipo) + '.' + ext
       const stream = Readable.from(part.data)
       await drive.files.create({
         requestBody: { name, parents: [folderId] },
@@ -118,7 +123,7 @@ export const handler = async (event) => {
       })
     }
 
-    const now = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
+    const now      = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
     const fullname = [b.paterno, b.materno, b.nombre].filter(Boolean).join(' ')
 
     await sheets.spreadsheets.values.append({
